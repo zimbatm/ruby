@@ -1391,10 +1391,15 @@ module DRb
     # Stop this server.
     def stop_service
       DRb.remove_server(self)
-      if  Thread.current['DRb'] && Thread.current['DRb']['server'] == self
-        Thread.current['DRb']['stop_service'] = true
-      else
-        @thread.kill.join
+      @thread.kill
+      
+      # Check for foreign sub-threads
+      f = @grp.list.select{|t| t['DRb'].nil?}
+      $stderr.puts "DRb unknown threads: #{f.inspect}" if f.any?
+      
+      # synchronous stop (without current and foreign threads)
+      while (@grp.list - [Thread.current] - f).size > 0
+        Thread.pass
       end
     end
 
@@ -1412,21 +1417,9 @@ module DRb
     end
 
     private
-    def kill_sub_thread
-      Thread.new do
-	grp = ThreadGroup.new
-	grp.add(Thread.current)
-	list = @grp.list
-	while list.size > 0
-	  list.each do |th|
-	    th.kill if th.alive?
-	  end
-	  list = @grp.list
-	end
-      end
-    end
 
     def run
+      @stop_service = false
       Thread.start do
 	begin
 	  while true
@@ -1434,7 +1427,7 @@ module DRb
 	  end
 	ensure
 	  @protocol.close if @protocol
-	  kill_sub_thread
+	  @stop_service = true
 	end
       end
     end
@@ -1598,11 +1591,10 @@ module DRb
 	    end
 	    client.send_reply(succ, result) rescue nil
 	  ensure
-            client.close unless succ
-            if Thread.current['DRb']['stop_service']
-              Thread.new { stop_service }
+            if !succ or @stop_service
+              client.close
+              break
             end
-            break unless succ
 	  end
 	end
       end
