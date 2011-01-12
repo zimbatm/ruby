@@ -261,12 +261,13 @@ rb_provide(const char *feature)
 
 NORETURN(static void load_failed(VALUE));
 
-static void
+VALUE
 rb_load_internal(VALUE fname, int wrap)
 {
     int state;
     rb_thread_t *th = GET_THREAD();
     volatile VALUE wrapper = th->top_wrapper;
+    volatile VALUE return_obj = Qtrue;
     volatile VALUE self = th->top_self;
     volatile int loaded = FALSE;
     volatile int mild_compile_error;
@@ -283,8 +284,9 @@ rb_load_internal(VALUE fname, int wrap)
     else {
 	/* load in anonymous module as toplevel */
 	th->top_self = rb_obj_clone(rb_vm_top_self());
-	th->top_wrapper = rb_module_new();
+        th->top_wrapper = rb_module_new();
 	rb_extend_object(th->top_self, th->top_wrapper);
+	return_obj = th->top_wrapper;
     }
 
     mild_compile_error = th->mild_compile_error;
@@ -322,6 +324,8 @@ rb_load_internal(VALUE fname, int wrap)
 	/* exception during load */
 	rb_exc_raise(th->errinfo);
     }
+
+    return return_obj;
 }
 
 void
@@ -372,8 +376,7 @@ rb_f_load(int argc, VALUE *argv)
 	    load_failed(fname);
 	path = fname;
     }
-    rb_load_internal(path, RTEST(wrap));
-    return Qtrue;
+    return rb_load_internal(path, RTEST(wrap));
 }
 
 static char *
